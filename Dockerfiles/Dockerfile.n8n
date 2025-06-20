@@ -1,0 +1,18 @@
+FROM n8nio/n8n:latest
+
+USER root
+
+# Añadir repo que contiene unrar 6.0.7 y la herramienta
+RUN echo "https://dl-cdn.alpinelinux.org/alpine/v3.14/main" >> /etc/apk/repositories \
+ && apk update \
+ && apk add --no-cache unrar=6.0.7-r0
+
+# Crear carpeta con permisos correctos
+RUN mkdir -p /data/shared/extract && chown -R node:node /data
+
+# Crear directorio de configuración de n8n con permisos correctos
+RUN mkdir -p /home/node/.n8n && \
+    chown -R node:node /home/node/.n8n && \
+    chmod 700 /home/node/.n8n
+
+USER node

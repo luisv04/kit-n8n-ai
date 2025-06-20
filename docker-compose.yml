@@ -1,0 +1,117 @@
+volumes:
+  n8n_storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./storage/n8n
+  postgres_storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./storage/postgres
+  qdrant_storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./storage/qdrant
+
+services:
+  postgres:
+    build:
+      context: .
+      dockerfile: Dockerfiles/Dockerfile.postgres
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    env_file:
+      - .env
+    volumes:
+      - postgres_storage:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  n8n:
+    build:
+      context: .
+      dockerfile: Dockerfiles/Dockerfile.n8n
+    container_name: n8n
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+    env_file:
+      - .env
+    volumes:
+      - n8n_storage:/home/node/.n8n
+      - ./storage/n8n-import:/demo-data
+      - ./storage/shared:/data/shared
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://localhost:5678/ || exit 1",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  n8n-import:
+    image: n8nio/n8n:latest
+    hostname: n8n-import
+    container_name: n8n-import
+    networks: ["internal"]
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=${POSTGRES_HOST}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET}
+      - TZ=America/Mexico_City
+    env_file:
+      - .env
+    entrypoint: /bin/ash
+    command: ["/auto-import.sh"]
+    volumes:
+      - ./storage/n8n-import:/data
+      - ./auto-import.sh:/auto-import.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      n8n:
+        condition: service_healthy
+    restart: "no"
+
+  doc-ocr-extractor:
+    build:
+      context: ./doc-ocr-extractor
+    container_name: doc-ocr-extractor
+    image: doc-ocr-extractor
+    ports:
+      - "8000:8000"
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge

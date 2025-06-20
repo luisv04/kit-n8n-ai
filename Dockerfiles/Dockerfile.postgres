@@ -1,0 +1,15 @@
+FROM postgres:15
+
+# Instala dependencias y pgvector
+RUN apt-get update && \
+    apt-get install -y postgresql-server-dev-15 git make gcc && \
+    git clone --branch v0.5.1 https://github.com/pgvector/pgvector.git && \
+    cd pgvector && \
+    make && make install && \
+    cd .. && rm -rf pgvector && \
+    apt-get remove -y git make gcc && \
+    apt-get autoremove -y && \
+    apt-get clean
+
+# Usa el mismo directorio de trabajo
+WORKDIR /var/lib/postgresql/data
