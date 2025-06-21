@@ -11,12 +11,42 @@ volumes:
       type: none
       o: bind
       device: ./storage/postgres
+  pgadmin_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./storage/pgadmin
   qdrant_storage:
     driver: local
     driver_opts:
       type: none
       o: bind
       device: ./storage/qdrant
+  redis_storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./storage/redis
+  flowise_storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./storage/flowise
+  nocodb_storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./storage/nocodb
+  chatwoot_storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./storage/chatwoot
 
 services:
   postgres:
@@ -24,8 +54,6 @@ services:
       context: .
       dockerfile: Dockerfiles/Dockerfile.postgres
     container_name: postgres
-    ports:
-      - "5432:5432"
     env_file:
       - .env
     volumes:
@@ -42,6 +70,27 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4:latest # Imagen oficial de pgAdmin
+    container_name: pgadmin_app
+    restart: unless-stopped
+    ports:
+      # Exponemos pgAdmin en la IP de WireGuard del servidor local y el puerto definido en .env (o 8091 por defecto)
+      # El puerto interno de pgAdmin en el contenedor es el 80
+      # - "10.0.0.2:${PGADMIN_PORT_ON_HOST:-8091}:80" # IP de WireGuard del servidor local [cite: 1]
+      - "8091:80"
+    env_file:
+      - .env
+    environment:
+      PGADMIN_LISTEN_PORT: "80" # Puerto en el que pgAdmin escucha dentro del contenedor
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin # Volumen para persistir datos de pgAdmin
+    networks:
+      - internal # Conectamos pgAdmin a la misma red que PostgreSQL
+    depends_on:
+      postgres: # Opcional, pero buena práctica: esperar a que la BD esté lista
+        condition: service_healthy
 
   n8n:
     build:
@@ -111,6 +160,216 @@ services:
       - "8000:8000"
     networks:
       - internal
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - redis_storage:/data
+    env_file:
+      - .env
+    command: >
+      redis-server
+      --requirepass "${REDIS_PASSWORD}"
+      --maxmemory ${REDIS_MAXMEMORY}
+      --maxmemory-policy allkeys-lru
+      --bind 0.0.0.0
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping > /dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  redisinsight:
+    image: redislabs/redisinsight:latest
+    container_name: redisinsight
+    restart: unless-stopped
+    networks:
+      - internal
+    ports:
+      - "5540:5540"
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  qdrant:
+    image: qdrant/qdrant
+    hostname: qdrant
+    container_name: qdrant
+    networks:
+      - internal
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+    environment:
+      QDRANT__SERVICE__API_KEY: "${QDRANT__SERVICE__API_KEY}"
+      QDRANT__LOG__LEVEL: "${QDRANT__LOG__LEVEL}"
+      QDRANT__STORAGE__MEMORY_LIMIT_MB: "${QDRANT__STORAGE__MEMORY_LIMIT_MB}"
+      QDRANT__STORAGE__SNAPSHOT_PERIOD_SEC: "${QDRANT__STORAGE__SNAPSHOT_PERIOD_SEC}"
+      QDRANT__SERVICE__ENABLE_CORS: "${QDRANT__SERVICE__ENABLE_CORS}"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+
+  flowise:
+    image: flowiseai/flowise
+    container_name: flowise
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    volumes:
+      - flowise_storage:/root/.flowise
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1",
+        ]
+      interval: 10s
+      timeout: 10s
+
+  nocodb:
+    image: nocodb/nocodb:latest
+    container_name: nocodb_app
+    restart: unless-stopped
+    ports:
+      # - "10.0.0.2:${NOCODB_PORT_ON_HOST:-8090}:8080"
+      - "${NOCODB_PORT_ON_HOST:-8090}:8080"
+    environment:
+      NC_ADMIN_EMAIL: "${NC_ADMIN_EMAIL}"
+      NC_ADMIN_PASSWORD: "${NC_ADMIN_PASSWORD}"
+      NC_AUTH_JWT_SECRET: "${NC_AUTH_JWT_SECRET}"
+      NC_DB_TYPE: "pg"
+      NC_PG_HOST: "postgres_nocodb"
+      NC_PG_PORT: "5432"
+      NC_PG_USER: "${POSTGRES_USER}"
+      NC_PG_PASSWORD: "${POSTGRES_PASSWORD}"
+      NC_PG_DATABASE: "${POSTGRES_DB}"
+      NC_ROOT_URL: "${NOCODB_PUBLIC_URL}"
+      NC_TOOL_TELEMETRY: "${NOCODB_TELEMETRY:-false}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - nocodb_storage:/usr/app/data/
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ========================================
+  # CHATWOOT SERVICES
+  # ========================================
+
+  chatwoot:
+    image: chatwoot/chatwoot:latest
+    container_name: chatwoot
+    command: "bundle exec rails s -e production -b 0.0.0.0"
+    depends_on:
+      chatwoot-setup:
+        condition: service_completed_successfully   # ⬅️ Aquí está la clave
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      sidekiq:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=${CHATWOOT_DATABASE_URL}
+      - REDIS_URL=${CHATWOOT_REDIS_URL}
+      - SECRET_KEY_BASE=${CHATWOOT_SECRET_KEY_BASE}
+      - FRONTEND_URL=${CHATWOOT_FRONTEND_URL}
+      - INSTALLATION_NAME=${CHATWOOT_INSTALLATION_NAME}
+      - DEFAULT_LOCALE=${CHATWOOT_DEFAULT_LOCALE}
+      - RAILS_ENV=${CHATWOOT_RAILS_ENV}
+      - NODE_ENV=${CHATWOOT_NODE_ENV}
+      - SMTP_ADDRESS=${CHATWOOT_SMTP_ADDRESS}
+      - SMTP_PORT=${CHATWOOT_SMTP_PORT}
+      - SMTP_DOMAIN=${CHATWOOT_SMTP_DOMAIN}
+      - SMTP_USERNAME=${CHATWOOT_SMTP_USERNAME}
+      - SMTP_PASSWORD=${CHATWOOT_SMTP_PASSWORD}
+      - SMTP_AUTHENTICATION=${CHATWOOT_SMTP_AUTHENTICATION}
+      - SMTP_ENABLE_STARTTLS_AUTO=${CHATWOOT_SMTP_ENABLE_STARTTLS_AUTO}
+      - STORAGE_PROVIDER=${CHATWOOT_STORAGE_PROVIDER}
+      - STORAGE_BUCKET=${CHATWOOT_STORAGE_BUCKET}
+      - STORAGE_REGION=${CHATWOOT_STORAGE_REGION}
+      - STORAGE_ACCESS_KEY_ID=${CHATWOOT_STORAGE_ACCESS_KEY_ID}
+      - STORAGE_SECRET_ACCESS_KEY=${CHATWOOT_STORAGE_SECRET_ACCESS_KEY}
+    ports:
+      - "3001:3000"
+    volumes:
+      - chatwoot_storage:/app/storage
+    networks:
+      - internal
+
+  sidekiq:
+    image: chatwoot/chatwoot:latest
+    container_name: chatwoot_sidekiq
+    command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Variables de entorno específicas para Sidekiq
+      - DATABASE_URL=${CHATWOOT_DATABASE_URL}
+      - REDIS_URL=${CHATWOOT_REDIS_URL}
+      - SECRET_KEY_BASE=${CHATWOOT_SECRET_KEY_BASE}
+      - RAILS_ENV=${CHATWOOT_RAILS_ENV}
+    volumes:
+      - chatwoot_storage:/app/storage
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep sidekiq | grep -v grep || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  chatwoot-setup:
+    image: chatwoot/chatwoot:latest
+    container_name: chatwoot_setup
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=${CHATWOOT_DATABASE_URL}
+      - REDIS_URL=${CHATWOOT_REDIS_URL}
+      - SECRET_KEY_BASE=${CHATWOOT_SECRET_KEY_BASE}
+      - RAILS_ENV=${CHATWOOT_RAILS_ENV}
+    command: >
+      sh -c "bundle exec rails db:prepare"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - internal
+    restart: "no"
+
 
 networks:
   internal:

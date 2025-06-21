@@ -1,6 +1,105 @@
+# Variables de entorno y credenciales
 .env
+.env.*
+*.env
+secrets/
+credentials/
+config/secrets.json
+config/credentials.json
+
+# Almacenamiento de datos
 storage/*
 !storage/.gitkeep
+
+# Datos de aplicaciones
+flowise_data/
+n8n_data/
+nocodb_data/
+qdrant_data/
+
+# Logs y archivos temporales
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Archivos de IDE
+.vscode/
+.idea/
+*.sublime-*
+.atom/
+
+# Archivos de Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+
+# Archivos de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Archivos de Docker
+.dockerignore
+
+# Archivos de backup
+*.bak
+*.backup
+*.old
+
+# Archivos de configuración local
+config.local.*
+settings.local.*
+
+# Workflows y datos de n8n
+n8n-workflows/
+n8n-data/
+workflows/
+*.json.bak
+
+# Base de datos y archivos de estado
+*.db
+*.sqlite
+*.sqlite3
 
 # Ignorar archivos temporales y de estado de PostgreSQL
 storage/postgres/postmaster.*
@@ -32,4 +131,49 @@ storage/postgres/pg_hba.conf
 storage/postgres/pg_ident.conf
 storage/postgres/postmaster.opts
 storage/postgres/postmaster.pid
+
+# Archivos de Redis
+storage/redis/*.rdb
+storage/redis/*.aof
+storage/redis/dump.rdb
+
+# Archivos de Qdrant
+storage/qdrant/data/
+storage/qdrant/snapshots/
+
+# Archivos de Flowise
+storage/flowise/database/
+storage/flowise/logs/
+
+# Archivos de NoCoDB
+storage/nocodb/data/
+storage/nocodb/logs/
+
+# Archivos de pgAdmin
+storage/pgadmin/pgadmin4.db
+storage/pgadmin/sessions/
+
+# Archivos compartidos
+storage/shared/uploads/
+storage/shared/temp/
+storage/shared/cache/
+
+# Archivos de importación
+storage/n8n-import/
+*.zip
+*.tar.gz
+
+# Archivos de certificados SSL
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+
+# Archivos de configuración de seguridad
+auth.json
+security.json
+*.key
+*.secret
 
